@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CEH Question Bank Practice</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="app-header">
+        <h1>CEH Question Bank Practice</h1>
+        <p class="subtitle">
+          Upload your own JSON question bank, provide a link, or use the built-in set. Your progress is saved
+          automatically.
+        </p>
+      </header>
+
+      <section class="bank-loader" aria-label="Question bank selection">
+        <div class="bank-loader__header">
+          <h2>Choose a question bank</h2>
+          <p>
+            Select a JSON file, supply a link, or fall back to the built-in questions. Progress for the active bank is
+            stored locally in your browser.
+          </p>
+        </div>
+        <div class="bank-loader__grid">
+          <label class="input-group">
+            <span class="input-group__label">Upload a JSON file</span>
+            <input type="file" id="question-file" accept="application/json" />
+          </label>
+          <div class="input-group">
+            <label class="input-group__label" for="question-url">Load from URL</label>
+            <div class="input-group__inline">
+              <input
+                type="url"
+                id="question-url"
+                name="question-url"
+                placeholder="https://example.com/questions.json"
+                autocomplete="off"
+              />
+              <button type="button" id="load-url">Load</button>
+            </div>
+          </div>
+          <button type="button" id="load-default" class="secondary full-width">Use built-in question bank</button>
+        </div>
+        <p class="current-bank">Current bank: <span id="source-label">Built-in question bank</span></p>
+        <div id="load-feedback" class="load-feedback" role="status" aria-live="polite"></div>
+      </section>
+
+      <section class="status-bar">
+        <div class="progress" id="progress">Loading questions…</div>
+        <div class="scoreboard">
+          <div class="score" id="score">Score: 0 / 0</div>
+          <div class="accuracy" id="accuracy">Accuracy: 0%</div>
+          <div class="answered" id="answered">Answered: 0</div>
+        </div>
+      </section>
+
+      <main id="question-area" aria-live="polite"></main>
+
+      <nav class="nav-controls" aria-label="Question navigation">
+        <button id="prev" type="button">Previous</button>
+        <button id="reset" type="button" class="secondary">Reset quiz</button>
+        <button id="next" type="button">Next</button>
+      </nav>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>
