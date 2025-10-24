@@ -44,6 +44,13 @@
           </div>
           <button type="button" id="load-default" class="secondary full-width">Use built-in question bank</button>
         </div>
+        <div class="progress-actions" aria-label="Progress tools">
+          <button type="button" id="export-progress" class="secondary">Export progress</button>
+          <label class="input-group">
+            <span class="input-group__label">Import saved progress</span>
+            <input type="file" id="progress-file" accept="application/json" />
+          </label>
+        </div>
         <p class="current-bank">Current bank: <span id="source-label">Built-in question bank</span></p>
         <div id="load-feedback" class="load-feedback" role="status" aria-live="polite"></div>
       </section>

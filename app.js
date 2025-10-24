@@ -21,6 +21,9 @@ const prevBtn = document.getElementById('prev');
 const nextBtn = document.getElementById('next');
 const resetBtn = document.getElementById('reset');
 
+const exportProgressBtn = document.getElementById('export-progress');
+const progressFileInput = document.getElementById('progress-file');
+
 const fileInput = document.getElementById('question-file');
 const urlInput = document.getElementById('question-url');
 const loadUrlBtn = document.getElementById('load-url');
@@ -203,26 +206,156 @@ async function loadQuestionBankFromFile(file) {
   }
 }
 
+function buildPersistedStateSnapshot() {
+  if (!state.questions.length) {
+    return null;
+  }
+  return {
+    questions: state.questions,
+    currentIndex: state.currentIndex,
+    source: state.source ? { ...state.source } : { ...defaultSource },
+    responses: Array.from(state.responses.entries()).map(([id, entry]) => ({
+      id,
+      correct: Boolean(entry.correct),
+      selected: Array.from(entry.selected || []),
+    })),
+  };
+}
+
+function applyPersistedStateSnapshot(snapshot) {
+  state.questions = snapshot.questions;
+  state.currentIndex = snapshot.currentIndex;
+  state.responses = snapshot.responses;
+  state.source = snapshot.source ? { ...snapshot.source } : { ...defaultSource };
+}
+
+function normalizePersistedState(persisted) {
+  if (!persisted || typeof persisted !== 'object') {
+    throw new Error('The progress data is invalid.');
+  }
+
+  if (!Array.isArray(persisted.questions) || !persisted.questions.length) {
+    throw new Error('The progress data does not include any questions.');
+  }
+
+  const questions = sanitizeQuestionBank(persisted.questions);
+  const questionsById = new Map(questions.map((question) => [question.id, question]));
+
+  const responses = new Map();
+  if (Array.isArray(persisted.responses)) {
+    persisted.responses.forEach((entry) => {
+      if (!entry || entry.id == null) {
+        return;
+      }
+      const question = questionsById.get(entry.id);
+      if (!question) {
+        return;
+      }
+      const optionLabels = new Set(question.options.map((option) => option.label));
+      const selectedValues = Array.isArray(entry.selected)
+        ? entry.selected.map((value) => String(value))
+        : [];
+      const filtered = new Set(selectedValues.filter((value) => optionLabels.has(value)));
+      const correctSet = new Set(question.correctAnswers);
+      const isCorrect = filtered.size === correctSet.size && [...filtered].every((value) => correctSet.has(value));
+      responses.set(entry.id, {
+        selected: filtered,
+        correct: isCorrect,
+      });
+    });
+  }
+
+  const storedIndex = Number.parseInt(persisted.currentIndex, 10);
+  const currentIndex = Number.isNaN(storedIndex)
+    ? 0
+    : Math.min(Math.max(storedIndex, 0), Math.max(questions.length - 1, 0));
+
+  const source = persisted.source ? { ...persisted.source } : { ...defaultSource };
+
+  return {
+    questions,
+    responses,
+    currentIndex,
+    source,
+  };
+}
+
+function createProgressFilename() {
+  const sourceLabel = state.source?.label || 'question-bank';
+  const safeLabel = sourceLabel
+    .toString()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'question-bank';
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  return `${safeLabel}-progress-${timestamp}.json`;
+}
+
+function handleExportProgress() {
+  if (!state.questions.length) {
+    showFeedback('Load a question bank before exporting progress.', 'error');
+    return false;
+  }
+  try {
+    const snapshot = buildPersistedStateSnapshot();
+    if (!snapshot) {
+      showFeedback('Load a question bank before exporting progress.', 'error');
+      return false;
+    }
+    const blob = new Blob([JSON.stringify(snapshot, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = createProgressFilename();
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+    showFeedback('Progress exported as a download.', 'success');
+    return true;
+  } catch (error) {
+    console.error('Failed to export progress.', error);
+    showFeedback('Unable to export progress.', 'error');
+    return false;
+  }
+}
+
+async function handleProgressImport(file) {
+  const label = file.name || 'selected file';
+  showFeedback(`Importing progress from ${label}…`, 'info');
+  try {
+    const text = await file.text();
+    let parsed;
+    try {
+      parsed = JSON.parse(text);
+    } catch (error) {
+      throw new Error('The selected file is not valid JSON.');
+    }
+    const snapshot = normalizePersistedState(parsed);
+    applyPersistedStateSnapshot(snapshot);
+    renderQuestion();
+    persistState();
+    showFeedback(`Imported progress from ${label}.`, 'success');
+    return true;
+  } catch (error) {
+    console.error('Failed to import progress.', error);
+    const normalized = normalizeError(error);
+    showFeedback(normalized.message || 'Unable to import progress.', 'error');
+    return false;
+  }
+}
+
 function persistState() {
   if (typeof window === 'undefined' || typeof window.localStorage === 'undefined') {
     return;
   }
   try {
-    if (!state.questions.length) {
+    const snapshot = buildPersistedStateSnapshot();
+    if (!snapshot) {
       window.localStorage.removeItem(STORAGE_KEY);
       return;
     }
-    const payload = {
-      questions: state.questions,
-      currentIndex: state.currentIndex,
-      source: state.source,
-      responses: Array.from(state.responses.entries()).map(([id, entry]) => ({
-        id,
-        correct: Boolean(entry.correct),
-        selected: Array.from(entry.selected || []),
-      })),
-    };
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
   } catch (error) {
     console.error('Unable to save quiz progress.', error);
   }
@@ -238,43 +371,8 @@ function restoreState() {
   }
   try {
     const parsed = JSON.parse(raw);
-    if (!parsed || !Array.isArray(parsed.questions) || !parsed.questions.length) {
-      return false;
-    }
-    const questions = sanitizeQuestionBank(parsed.questions);
-    const questionsById = new Map(questions.map((question) => [question.id, question]));
-    const responses = new Map();
-    if (Array.isArray(parsed.responses)) {
-      parsed.responses.forEach((entry) => {
-        if (!entry || entry.id == null) {
-          return;
-        }
-        const question = questionsById.get(entry.id);
-        if (!question) {
-          return;
-        }
-        const optionLabels = new Set(question.options.map((option) => option.label));
-        const selectedValues = Array.isArray(entry.selected)
-          ? entry.selected.map((value) => String(value))
-          : [];
-        const filtered = new Set(selectedValues.filter((value) => optionLabels.has(value)));
-        const correctSet = new Set(question.correctAnswers);
-        const isCorrect = filtered.size === correctSet.size && [...filtered].every((value) => correctSet.has(value));
-        responses.set(entry.id, {
-          selected: filtered,
-          correct: isCorrect,
-        });
-      });
-    }
-    state.questions = questions;
-    const storedIndex = Number.parseInt(parsed.currentIndex, 10);
-    if (Number.isNaN(storedIndex)) {
-      state.currentIndex = 0;
-    } else {
-      state.currentIndex = Math.min(Math.max(storedIndex, 0), Math.max(questions.length - 1, 0));
-    }
-    state.responses = responses;
-    state.source = parsed.source ? { ...parsed.source } : { ...defaultSource };
+    const snapshot = normalizePersistedState(parsed);
+    applyPersistedStateSnapshot(snapshot);
     return true;
   } catch (error) {
     console.error('Failed to restore saved progress.', error);
@@ -566,6 +664,26 @@ if (fileInput) {
       return;
     }
     const success = await loadQuestionBankFromFile(target.files[0]);
+    target.value = '';
+    if (!success) {
+      target.focus();
+    }
+  });
+}
+
+if (exportProgressBtn) {
+  exportProgressBtn.addEventListener('click', () => {
+    handleExportProgress();
+  });
+}
+
+if (progressFileInput) {
+  progressFileInput.addEventListener('change', async (event) => {
+    const target = event.target;
+    if (!target.files || !target.files[0]) {
+      return;
+    }
+    const success = await handleProgressImport(target.files[0]);
     target.value = '';
     if (!success) {
       target.focus();
